@@ -72,7 +72,7 @@ async def handle_photo(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 user_secrets[update.effective_user.id] = secret
                 context.user_data['label'] = label
                 context.user_data['service'] = service
-                await update.message.reply_text(f"✅ {service} for *{label}*
+await update.message.reply_text(f"✅ {service} for *{label}*`")
 🔐 Secret: `{secret}`", parse_mode="Markdown", reply_markup=get_keyboard())
             else:
                 await update.message.reply_text("❌ No valid Secret in QR.")
