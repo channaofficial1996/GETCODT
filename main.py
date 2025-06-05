@@ -82,18 +82,19 @@ async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
         return
 
     # Get OTP for alias (keyboard)
-    elif text.lower() == "get otp":
-        alias = user_aliases.get(user_id)
-        if not alias:
-            await update.message.reply_text("❌ សូមផ្ញើ alias email មុនសិន!")
-            return
-        domain = get_domain(alias)
-        result = await fetch_mail_otp(alias, domain)
-        if result:
-            await update.message.reply_text(f"🔐 OTP សម្រាប់ `{alias}` គឺ: `{result}`", parse_mode="Markdown")
-        else:
-            await update.message.reply_text("❌ មិនមាន OTP សម្រាប់ alias នេះ")
+# ...
+elif text.lower() == "get otp":
+    alias = user_aliases.get(user_id)
+    if not alias:
+        await update.message.reply_text("❌ សូមផ្ញើ alias email មុនសិន!")
         return
+    domain = get_domain(alias)
+    result = await fetch_mail_otp(alias, domain, debug_update=update)
+    if result:
+        await update.message.reply_text(f"🔐 OTP សម្រាប់ `{alias}` គឺ: `{result}`", parse_mode="Markdown")
+    else:
+        await update.message.reply_text("❌ មិនមាន OTP សម្រាប់ alias នេះ")
+    return
 
     await update.message.reply_text("⚠️ Input មិនត្រឹមត្រូវ។")
 
@@ -144,19 +145,19 @@ async def handle_button(update: Update, context: ContextTypes.DEFAULT_TYPE):
         else:
             await q.message.reply_text("⚠️ No Secret found.")
     elif q.data == "mail_otp":
-        alias = user_aliases.get(user_id)
-        if not alias:
-            await q.message.reply_text("⚠️ Alias email not set.")
-            return
-        domain = get_domain(alias)
-        result = await fetch_mail_otp(alias, domain)
-        if result:
-            await q.message.reply_text(f"✉️ Mail OTP: `{result}`", parse_mode="Markdown")
-        else:
-            await q.message.reply_text("❌ No OTP found for alias.")
+    alias = user_aliases.get(user_id)
+    if not alias:
+        await q.message.reply_text("⚠️ Alias email not set.")
+        return
+    domain = get_domain(alias)
+    result = await fetch_mail_otp(alias, domain, debug_update=q)
+    if result:
+        await q.message.reply_text(f"✉️ Mail OTP: `{result}`", parse_mode="Markdown")
+    else:
+        await q.message.reply_text("❌ No OTP found for alias.")
 
 # --------- Mail OTP Core ---------
-async def fetch_mail_otp(alias_email, domain):
+async def fetch_mail_otp(alias_email, domain, debug_update=None):
     accounts = EMAIL_ACCOUNTS.get(domain)
     if not accounts:
         return None
@@ -180,32 +181,20 @@ async def fetch_mail_otp(alias_email, domain):
                             result, msg_data = mail.fetch(num, "(RFC822)")
                             raw_email = msg_data[0][1]
                             msg = email.message_from_bytes(raw_email)
-
-                            # -------- Debug: Print All Headers --------
-                            print("\n=== Email Headers ===")
-                            print("To:", msg.get("To", ""))
-                            print("Delivered-To:", msg.get("Delivered-To", ""))
-                            print("Envelope-To:", msg.get("Envelope-To", ""))
-                            print("X-Yandex-Forward:", msg.get("X-Yandex-Forward", ""))
-                            print("Cc:", msg.get("Cc", ""))
-                            print("Bcc:", msg.get("Bcc", ""))
-                            print("Subject:", msg.get("Subject", ""))
-                            print("====================\n")
-                            # -----------------------------------------
-
                             all_headers = [
-                                msg.get("To", ""),
-                                msg.get("Delivered-To", ""),
-                                msg.get("Envelope-To", ""),
-                                msg.get("X-Yandex-Forward", ""),
-                                msg.get("Cc", ""),
-                                msg.get("Bcc", ""),
+                                ("To", msg.get("To", "")),
+                                ("Delivered-To", msg.get("Delivered-To", "")),
+                                ("Envelope-To", msg.get("Envelope-To", "")),
+                                ("X-Yandex-Forward", msg.get("X-Yandex-Forward", "")),
+                                ("Cc", msg.get("Cc", "")),
+                                ("Bcc", msg.get("Bcc", "")),
+                                ("Subject", msg.get("Subject", "")),
                             ]
-                            # Make sure all are cleaned for robust match
-                            header_str = " ".join([h.lower().replace(" ","").strip() for h in all_headers if h])
+                            # Clean header string for match
+                            header_str = " ".join([h[1].lower().replace(" ","").strip() for h in all_headers if h[1]])
                             alias_check = alias_email.lower().replace(" ","").strip()
                             if alias_check not in header_str:
-                                # If not found in headers, try in body as fallback
+                                # fallback: check body
                                 body = ""
                                 if msg.is_multipart():
                                     for part in msg.walk():
@@ -216,7 +205,6 @@ async def fetch_mail_otp(alias_email, domain):
                                     body = msg.get_payload(decode=True).decode(errors="ignore")
                                 if alias_check not in body.lower().replace(" ",""):
                                     continue
-
                             # Found matching mail: try extract OTP from subject or body
                             subject = msg.get("Subject", "")
                             body = ""
@@ -231,21 +219,18 @@ async def fetch_mail_otp(alias_email, domain):
                             if otp:
                                 mail.logout()
                                 return otp
+                            # --- If no OTP found but found alias: Send headers to Telegram for debug ---
+                            if debug_update is not None:
+                                header_lines = "\n".join([f"{h[0]}: {h[1]}" for h in all_headers if h[1]])
+                                preview_body = (body[:300] + '...') if len(body) > 300 else body
+                                await debug_update.message.reply_text(
+                                    f"🔎 [DEBUG] No OTP found in matched email.\n\n{header_lines}\nBody:\n{preview_body}")
                     except Exception as e:
-                        print("ERROR:", e)
                         continue
             mail.logout()
         except Exception as e:
-            print("ERROR:", e)
             continue
     return None
-
-def extract_otp(text):
-    if not text:
-        return None
-    # Match 4-8 digit codes (support Facebook, Google, etc.)
-    match = re.search(r'\b\d{4,8}\b', text)
-    return match.group(0) if match else None
 
 # --------- Main Entrypoint ---------
 BOT_TOKEN = "7915387166:AAFeGRGme39-znPBxDLOu8BrHheqsOWUIR4"  # <---- ប្ដូរទៅ Bot Token របស់អ្នក
