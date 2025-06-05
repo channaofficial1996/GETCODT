@@ -1,4 +1,4 @@
-# ✅ Telegram 2FA Bot | QR Secret, Manual Secret, Alias Email OTP (Yandex, Zoho, Gmail, Hotmail)
+# ✅ Telegram 2FA Bot: QR/Secret Key, Manual, Alias Email OTP (Yandex, Gmail, Zoho, Hotmail, Outlook) with Header Debug
 import re
 import imaplib
 import email
@@ -24,14 +24,15 @@ EMAIL_ACCOUNTS = {
     "hotmail.com": [
         {"email": "your.hotmail@hotmail.com", "password": "your_hotmail_pwd", "imap": "imap-mail.outlook.com"},
     ],
+    "outlook.com": [
+        {"email": "your.outlook@outlook.com", "password": "your_outlook_pwd", "imap": "imap-mail.outlook.com"},
+    ],
 }
 
-# --------- User memory ---------
 user_aliases = {}    # user_id: alias email
 user_secrets = {}    # user_id: secret
 user_context = {}    # user_id: {"label":..., "service":...}
 
-# --------- Utility ---------
 def get_domain(email):
     return email.split('@')[-1].lower()
 
@@ -54,12 +55,11 @@ def detect_service(label):
     if 'zoho' in l: return "Zoho 2FA"
     return "Other 2FA"
 
-# --------- Main Handlers ---------
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text(
-        "👋 Welcome! \n\n" +
-        "• ផ្ញើ alias email (ឧ. cambo.ads+123456@yandex.com) \n" +
-        "• ឬផ្ញើ QR / Secret Key (manual) ដើម្បី generate OTP\n",
+        "👋 Welcome! \n\n"
+        "• ផ្ញើ alias email (ឧ. cambo.ads+123456@yandex.com)\n"
+        "• ឬផ្ញើ QR / Secret Key (manual)\n",
         reply_markup=ReplyKeyboardMarkup([["Get OTP"]], resize_keyboard=True)
     )
 
@@ -67,13 +67,13 @@ async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_id = update.effective_user.id
     text = update.message.text.strip()
 
-    # Set alias email (must contain + and endwith supported domains)
+    # Save alias email
     if "+" in text and any(text.endswith(f"@{d}") for d in EMAIL_ACCOUNTS):
         user_aliases[user_id] = text
         await update.message.reply_text(f"✅ Alias `{text}` ត្រូវបានកំណត់។", parse_mode="Markdown", reply_markup=get_keyboard())
         return
 
-    # Set Secret Key
+    # Save Secret Key
     elif re.fullmatch(r'[A-Z2-7]{16,}', text.upper()):
         secret = text.upper()
         user_secrets[user_id] = secret
@@ -81,7 +81,7 @@ async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await update.message.reply_text("✅ Secret Key saved.", reply_markup=get_keyboard())
         return
 
-    # If user click "Get OTP" in keyboard (for alias)
+    # Get OTP for alias (keyboard)
     elif text.lower() == "get otp":
         alias = user_aliases.get(user_id)
         if not alias:
@@ -164,12 +164,10 @@ async def fetch_mail_otp(alias_email, domain):
         try:
             mail = imaplib.IMAP4_SSL(acc['imap'])
             mail.login(acc['email'], acc['password'])
-            # folders
             result, folders = mail.list()
             if result != 'OK':
                 mail.logout()
                 continue
-            # Loop folders (Inbox/Social/Network/Facebook)
             for f in folders:
                 folder_name = f.decode().split('"/')[-1].strip('"')
                 if any(k in folder_name.lower() for k in ["inbox", "social", "facebook", "network"]):
@@ -182,19 +180,44 @@ async def fetch_mail_otp(alias_email, domain):
                             result, msg_data = mail.fetch(num, "(RFC822)")
                             raw_email = msg_data[0][1]
                             msg = email.message_from_bytes(raw_email)
-                            # Check all possible "to" headers for alias
+
+                            # -------- Debug: Print All Headers --------
+                            print("\n=== Email Headers ===")
+                            print("To:", msg.get("To", ""))
+                            print("Delivered-To:", msg.get("Delivered-To", ""))
+                            print("Envelope-To:", msg.get("Envelope-To", ""))
+                            print("X-Yandex-Forward:", msg.get("X-Yandex-Forward", ""))
+                            print("Cc:", msg.get("Cc", ""))
+                            print("Bcc:", msg.get("Bcc", ""))
+                            print("Subject:", msg.get("Subject", ""))
+                            print("====================\n")
+                            # -----------------------------------------
+
                             all_headers = [
                                 msg.get("To", ""),
                                 msg.get("Delivered-To", ""),
-                                msg.get("X-Envelope-To", ""),
+                                msg.get("Envelope-To", ""),
                                 msg.get("X-Yandex-Forward", ""),
                                 msg.get("Cc", ""),
                                 msg.get("Bcc", ""),
                             ]
-                            header_str = " ".join([h.lower() for h in all_headers if h])
-                            if alias_email.lower() not in header_str:
-                                continue
-                            # Get OTP in subject or body
+                            # Make sure all are cleaned for robust match
+                            header_str = " ".join([h.lower().replace(" ","").strip() for h in all_headers if h])
+                            alias_check = alias_email.lower().replace(" ","").strip()
+                            if alias_check not in header_str:
+                                # If not found in headers, try in body as fallback
+                                body = ""
+                                if msg.is_multipart():
+                                    for part in msg.walk():
+                                        if part.get_content_type() == "text/plain":
+                                            body = part.get_payload(decode=True).decode(errors="ignore")
+                                            break
+                                else:
+                                    body = msg.get_payload(decode=True).decode(errors="ignore")
+                                if alias_check not in body.lower().replace(" ",""):
+                                    continue
+
+                            # Found matching mail: try extract OTP from subject or body
                             subject = msg.get("Subject", "")
                             body = ""
                             if msg.is_multipart():
@@ -208,27 +231,29 @@ async def fetch_mail_otp(alias_email, domain):
                             if otp:
                                 mail.logout()
                                 return otp
-                    except Exception:
+                    except Exception as e:
+                        print("ERROR:", e)
                         continue
             mail.logout()
-        except Exception:
+        except Exception as e:
+            print("ERROR:", e)
             continue
     return None
 
 def extract_otp(text):
     if not text:
         return None
-    # Match 4-8 digit codes
+    # Match 4-8 digit codes (support Facebook, Google, etc.)
     match = re.search(r'\b\d{4,8}\b', text)
     return match.group(0) if match else None
 
 # --------- Main Entrypoint ---------
-BOT_TOKEN = "7915387166:AAFeGRGme39-znPBxDLOu8BrHheqsOWUIR4"
+BOT_TOKEN = "7915387166:AAFeGRGme39-znPBxDLOu8BrHheqsOWUIR4"  # <---- ប្ដូរទៅ Bot Token របស់អ្នក
 app = ApplicationBuilder().token(BOT_TOKEN).build()
 app.add_handler(CommandHandler("start", start))
 app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_text))
 app.add_handler(MessageHandler(filters.PHOTO, handle_photo))
 app.add_handler(CallbackQueryHandler(handle_button))
 
-print("🤖 Bot is running with QR/Secret + Alias Email OTP (Yandex, Zoho, Gmail...) Support...")
+print("🤖 Bot is running with QR/Secret + Alias Email OTP (Yandex, Zoho, Gmail, Hotmail, Outlook) Support...")
 app.run_polling()
