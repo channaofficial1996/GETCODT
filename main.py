@@ -1,4 +1,3 @@
-
 # ✅ Telegram 2FA Bot with Alias Email OTP + QR Secret Key
 
 import re
@@ -52,7 +51,9 @@ def detect_service(label):
     return "Other 2FA"
 
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    await update.message.reply_text("👋 Welcome! Send your alias email (e.g. cambo.ads+123@gmail.com) or QR/Secret Key.")
+    await update.message.reply_text(
+        "👋 Welcome! Send your alias email (e.g. cambo.ads+123@gmail.com) or QR/Secret Key."
+    )
 
 async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
     text = update.message.text.strip()
@@ -85,8 +86,11 @@ async def handle_photo(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 user_secrets[update.effective_user.id] = secret
                 context.user_data['label'] = label
                 context.user_data['service'] = service
-                await update.message.reply_text(f"✅ {service} for *{label}*
-🔐 Secret: `{secret}`", parse_mode="Markdown", reply_markup=get_keyboard())
+                await update.message.reply_text(
+                    f"✅ {service} for *{label}*\n🔐 Secret: `{secret}`",
+                    parse_mode="Markdown",
+                    reply_markup=get_keyboard()
+                )
             else:
                 await update.message.reply_text("❌ No valid Secret in QR.")
         else:
@@ -103,15 +107,20 @@ async def handle_button(update: Update, context: ContextTypes.DEFAULT_TYPE):
         if secret:
             label = context.user_data.get("label", "Unknown")
             service = context.user_data.get("service", "2FA")
-            await q.message.reply_text(f"✅ {service} for *{label}*
-🔐 Secret: `{secret}`", parse_mode="Markdown")
+            await q.message.reply_text(
+                f"✅ {service} for *{label}*\n🔐 Secret: `{secret}`",
+                parse_mode="Markdown"
+            )
         else:
             await q.message.reply_text("⚠️ No Secret found.")
     elif q.data == "show_otp":
         secret = user_secrets.get(uid)
         if secret:
             otp = pyotp.TOTP(secret).now()
-            await q.message.reply_text(f"🔐 OTP: `{otp}`", parse_mode="Markdown")
+            await q.message.reply_text(
+                f"🔐 OTP: `{otp}`",
+                parse_mode="Markdown"
+            )
         else:
             await q.message.reply_text("⚠️ No Secret found.")
     elif q.data == "mail_otp":
@@ -131,7 +140,8 @@ async def handle_button(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 mail.select("inbox")
                 result, data = mail.search(None, f'TO "{alias}"')
                 ids = data[0].split()
-                if not ids: continue
+                if not ids:
+                    continue
                 result, msg_data = mail.fetch(ids[-1], "(RFC822)")
                 raw_email = msg_data[0][1]
                 msg = email.message_from_bytes(raw_email)
@@ -146,9 +156,12 @@ async def handle_button(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 otp_match = re.search(r'\b(\d{6})\b', body)
                 if otp_match:
                     otp = otp_match.group(1)
-                    await q.message.reply_text(f"✉️ Mail OTP: `{otp}`", parse_mode="Markdown")
+                    await q.message.reply_text(
+                        f"✉️ Mail OTP: `{otp}`",
+                        parse_mode="Markdown"
+                    )
                     return
-            except:
+            except Exception as e:
                 continue
         await q.message.reply_text("❌ No OTP found for alias.")
 
