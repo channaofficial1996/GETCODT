@@ -1,3 +1,4 @@
+
 # ✅ Telegram 2FA Bot with Alias Email OTP + QR Secret Key
 
 import re
@@ -84,8 +85,11 @@ async def handle_photo(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 user_secrets[update.effective_user.id] = secret
                 context.user_data['label'] = label
                 context.user_data['service'] = service
-                await update.message.reply_text(f"✅ {service} for *{label}*
-🔐 Secret: `{secret}`", parse_mode="Markdown", reply_markup=get_keyboard())
+                await update.message.reply_text(
+                    f"✅ {service} for *{label}*
+🔐 Secret: `{secret}`",
+                    parse_mode="Markdown", reply_markup=get_keyboard()
+                )
             else:
                 await update.message.reply_text("❌ No valid Secret in QR.")
         else:
@@ -151,7 +155,8 @@ async def handle_button(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 continue
         await q.message.reply_text("❌ No OTP found for alias.")
 
-BOT_TOKEN = "7915387166:AAFeGRGme39-znPBxDLOu8BrHheqsOWUIR4"
+# ✅ Replace with your token
+BOT_TOKEN = "8042421392:AAHMz2z5EJxenhDryF3rAVmMwWN58BbSljs"
 app = ApplicationBuilder().token(BOT_TOKEN).build()
 app.add_handler(CommandHandler("start", start))
 app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_text))
