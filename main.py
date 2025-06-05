@@ -1,5 +1,3 @@
-# ✅ Telegram 2FA Bot with Alias Email OTP + QR Secret Key
-
 import re
 import imaplib
 import email
@@ -123,59 +121,63 @@ async def handle_button(update: Update, context: ContextTypes.DEFAULT_TYPE):
             )
         else:
             await q.message.reply_text("⚠️ No Secret found.")
-  elif q.data == "mail_otp":
-    alias = user_aliases.get(uid)
-    if not alias:
-        await q.message.reply_text("⚠️ Alias email not set.")
-        return
-    domain = get_domain(alias)
-    accounts = EMAIL_ACCOUNTS.get(domain)
-    if not accounts:
-        await q.message.reply_text("❌ Domain not supported.")
-        return
-    found_otp = False
-    for acc in accounts:
-        try:
-            mail = imaplib.IMAP4_SSL(acc['imap'])
-            mail.login(acc['email'], acc['password'])
-            mail.select("inbox")
-            # Get the last 20 emails in the inbox
-            result, data = mail.search(None, "ALL")
-            ids = data[0].split()
-            latest_ids = ids[-20:] if len(ids) > 20 else ids
-            for num in reversed(latest_ids):
-                result, msg_data = mail.fetch(num, "(RFC822)")
-                raw_email = msg_data[0][1]
-                msg = email.message_from_bytes(raw_email)
-                # Check To header for alias match
-                to_header = msg.get('To', '')
-                if alias.lower() not in to_header.lower():
-                    continue
-                # Try to extract body
-                body = ""
-                if msg.is_multipart():
-                    for part in msg.walk():
-                        if part.get_content_type() == "text/plain":
-                            body = part.get_payload(decode=True).decode(errors="ignore")
-                            break
-                else:
-                    body = msg.get_payload(decode=True).decode(errors="ignore")
-                # Search for 6-digit OTP
-                otp_match = re.search(r'\b(\d{6})\b', body)
-                if otp_match:
-                    otp = otp_match.group(1)
-                    await q.message.reply_text(
-                        f"✉️ Mail OTP: `{otp}`",
-                        parse_mode="Markdown"
-                    )
-                    found_otp = True
-                    break
-            mail.logout()
-            if found_otp:
-                return
-        except Exception as e:
-            continue
-    await q.message.reply_text("❌ No OTP found for alias.")
+    elif q.data == "mail_otp":
+        alias = user_aliases.get(uid)
+        if not alias:
+            await q.message.reply_text("⚠️ Alias email not set.")
+            return
+        domain = get_domain(alias)
+        accounts = EMAIL_ACCOUNTS.get(domain)
+        if not accounts:
+            await q.message.reply_text("❌ Domain not supported.")
+            return
+        found_otp = False
+        for acc in accounts:
+            try:
+                mail = imaplib.IMAP4_SSL(acc['imap'])
+                mail.login(acc['email'], acc['password'])
+                mail.select("inbox")
+                # Get the last 20 emails in the inbox
+                result, data = mail.search(None, "ALL")
+                ids = data[0].split()
+                latest_ids = ids[-20:] if len(ids) > 20 else ids
+                for num in reversed(latest_ids):
+                    result, msg_data = mail.fetch(num, "(RFC822)")
+                    raw_email = msg_data[0][1]
+                    msg = email.message_from_bytes(raw_email)
+                    # Check To header for alias match
+                    to_header = msg.get('To', '')
+                    # Also check Delivered-To/Envelope-To headers for more reliability
+                    delivered_to = msg.get('Delivered-To', '')
+                    envelope_to = msg.get('Envelope-To', '')
+                    headers_concat = f"{to_header} {delivered_to} {envelope_to}".lower()
+                    if alias.lower() not in headers_concat:
+                        continue
+                    # Try to extract body
+                    body = ""
+                    if msg.is_multipart():
+                        for part in msg.walk():
+                            if part.get_content_type() == "text/plain":
+                                body = part.get_payload(decode=True).decode(errors="ignore")
+                                break
+                    else:
+                        body = msg.get_payload(decode=True).decode(errors="ignore")
+                    # Search for 6-digit OTP
+                    otp_match = re.search(r'\b(\d{6})\b', body)
+                    if otp_match:
+                        otp = otp_match.group(1)
+                        await q.message.reply_text(
+                            f"✉️ Mail OTP: `{otp}`",
+                            parse_mode="Markdown"
+                        )
+                        found_otp = True
+                        break
+                mail.logout()
+                if found_otp:
+                    return
+            except Exception as e:
+                continue
+        await q.message.reply_text("❌ No OTP found for alias.")
 
 # ✅ Replace with your token
 BOT_TOKEN = "7915387166:AAFeGRGme39-znPBxDLOu8BrHheqsOWUIR4"
