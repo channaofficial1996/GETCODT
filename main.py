@@ -15,7 +15,7 @@ EMAIL_ACCOUNTS = {
         {"email": "your.email@gmail.com", "password": "your_app_pwd", "imap": "imap.gmail.com"},
     ],
     "yandex.com": [
-        {"email": "Cambo.ads@yandex.com", "password": "jgexgxxedmqheewx", "imap": "imap.yandex.com"},
+        {"email": "cambo.ads@yandex.com", "password": "jgexgxxedmqheewx", "imap": "imap.yandex.com"},
     ],
     "zoho.com": [
         {"email": "your.zoho@zohomail.com", "password": "your_zoho_pwd", "imap": "imap.zoho.com"},
