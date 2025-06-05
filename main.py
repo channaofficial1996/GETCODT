@@ -1,5 +1,3 @@
-# ✅ Telegram 2FA Bot with Alias Email OTP + QR Secret Key (Dynamic Folder Support)
-
 import re
 import imaplib
 import email
@@ -9,12 +7,13 @@ import urllib.parse
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
 from telegram.ext import ApplicationBuilder, CommandHandler, MessageHandler, CallbackQueryHandler, ContextTypes, filters
 
+# ✅ Multiple email accounts per domain
 EMAIL_ACCOUNTS = {
     "gmail.com": [
         {"email": "your.email@gmail.com", "password": "your_app_pwd", "imap": "imap.gmail.com"},
     ],
     "yandex.com": [
-        {"email": "your.yandex@yandex.com", "password": "your_yandex_pwd", "imap": "imap.yandex.com"},
+        {"email": "Cambo.ads@yandex.com", "password": "jgexgxxedmqheewx", "imap": "imap.yandex.com"},
     ],
     "zoho.com": [
         {"email": "your.zoho@zohomail.com", "password": "your_zoho_pwd", "imap": "imap.zoho.com"},
@@ -50,7 +49,9 @@ def detect_service(label):
     return "Other 2FA"
 
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    await update.message.reply_text("👋 Welcome! Send your alias email (e.g. cambo.ads+123@gmail.com) or QR/Secret Key.")
+    await update.message.reply_text(
+        "👋 Welcome! Send your alias email (e.g. cambo.ads+123@gmail.com) or QR/Secret Key."
+    )
 
 async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
     text = update.message.text.strip()
@@ -83,8 +84,11 @@ async def handle_photo(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 user_secrets[update.effective_user.id] = secret
                 context.user_data['label'] = label
                 context.user_data['service'] = service
-                await update.message.reply_text(f"✅ {service} for *{label}*
-🔐 Secret: `{secret}`", parse_mode="Markdown", reply_markup=get_keyboard())
+                await update.message.reply_text(
+                    f"✅ {service} for *{label}*\n🔐 Secret: `{secret}`",
+                    parse_mode="Markdown",
+                    reply_markup=get_keyboard()
+                )
             else:
                 await update.message.reply_text("❌ No valid Secret in QR.")
         else:
@@ -96,74 +100,85 @@ async def handle_button(update: Update, context: ContextTypes.DEFAULT_TYPE):
     q = update.callback_query
     await q.answer()
     uid = q.from_user.id
-
     if q.data == "show_secret":
         secret = user_secrets.get(uid)
         if secret:
             label = context.user_data.get("label", "Unknown")
             service = context.user_data.get("service", "2FA")
-            await q.message.reply_text(f"✅ {service} for *{label}*
-🔐 Secret: `{secret}`", parse_mode="Markdown")
+            await q.message.reply_text(
+                f"✅ {service} for *{label}*\n🔐 Secret: `{secret}`",
+                parse_mode="Markdown"
+            )
         else:
             await q.message.reply_text("⚠️ No Secret found.")
-
     elif q.data == "show_otp":
         secret = user_secrets.get(uid)
         if secret:
             otp = pyotp.TOTP(secret).now()
-            await q.message.reply_text(f"🔐 OTP: `{otp}`", parse_mode="Markdown")
+            await q.message.reply_text(
+                f"🔐 OTP: `{otp}`",
+                parse_mode="Markdown"
+            )
         else:
             await q.message.reply_text("⚠️ No Secret found.")
-
     elif q.data == "mail_otp":
-        alias = user_aliases.get(uid)
-        if not alias:
-            await q.message.reply_text("⚠️ Alias email not set.")
-            return
-        domain = get_domain(alias)
-        accounts = EMAIL_ACCOUNTS.get(domain)
-        if not accounts:
-            await q.message.reply_text("❌ Domain not supported.")
-            return
-
-        for acc in accounts:
-            try:
-                mail = imaplib.IMAP4_SSL(acc['imap'])
-                mail.login(acc['email'], acc['password'])
-                result, folders = mail.list()
-                if result != 'OK':
+    alias = user_aliases.get(uid)
+    if not alias:
+        await q.message.reply_text("⚠️ Alias email not set.")
+        return
+    domain = get_domain(alias)
+    accounts = EMAIL_ACCOUNTS.get(domain)
+    if not accounts:
+        await q.message.reply_text("❌ Domain not supported.")
+        return
+    found_otp = False
+    for acc in accounts:
+        try:
+            mail = imaplib.IMAP4_SSL(acc['imap'])
+            mail.login(acc['email'], acc['password'])
+            mail.select("inbox")
+            # ស្វែងរកសំបុត្រចុងក្រោយ 20
+            result, data = mail.search(None, "ALL")
+            ids = data[0].split()
+            latest_ids = ids[-20:] if len(ids) > 20 else ids
+            for num in reversed(latest_ids):
+                result, msg_data = mail.fetch(num, "(RFC822)")
+                raw_email = msg_data[0][1]
+                msg = email.message_from_bytes(raw_email)
+                # ពិនិត្យ header ទាំងអស់សម្រាប់ alias (To, Delivered-To, Envelope-To)
+                to_header = msg.get('To', '')
+                delivered_to = msg.get('Delivered-To', '')
+                envelope_to = msg.get('Envelope-To', '')
+                headers_concat = f"{to_header} {delivered_to} {envelope_to}".lower()
+                if alias.lower() not in headers_concat:
                     continue
-                for f in folders:
-                    folder_name = f.decode().split('"')[-2]
-                    if any(k in folder_name.lower() for k in ["inbox", "social", "facebook", "fb"]):
-                        try:
-                            mail.select(f'"{folder_name}"')
-                            result, data = mail.search(None, f'TO "{alias}"')
-                            ids = data[0].split()
-                            if not ids:
-                                continue
-                            result, msg_data = mail.fetch(ids[-1], "(RFC822)")
-                            raw_email = msg_data[0][1]
-                            msg = email.message_from_bytes(raw_email)
-                            body = ""
-                            if msg.is_multipart():
-                                for part in msg.walk():
-                                    if part.get_content_type() == "text/plain":
-                                        body = part.get_payload(decode=True).decode()
-                                        break
-                            else:
-                                body = msg.get_payload(decode=True).decode()
-                            otp_match = re.search(r'\b(\d{6,8})\b', body)
-                            if otp_match:
-                                otp = otp_match.group(1)
-                                await q.message.reply_text(f"✉️ Mail OTP: `{otp}`", parse_mode="Markdown")
-                                return
-                        except:
-                            continue
-            except:
-                continue
-        await q.message.reply_text("❌ No OTP found for alias.")
+                # យក body text
+                body = ""
+                if msg.is_multipart():
+                    for part in msg.walk():
+                        if part.get_content_type() == "text/plain":
+                            body = part.get_payload(decode=True).decode(errors="ignore")
+                            break
+                else:
+                    body = msg.get_payload(decode=True).decode(errors="ignore")
+                # ចាប់លេខកូដ 6-8 ខ្ទង់ (regex)
+                otp_match = re.search(r'\b(\d{6,8})\b', body)
+                if otp_match:
+                    otp = otp_match.group(1)
+                    await q.message.reply_text(
+                        f"✉️ Mail OTP: `{otp}`",
+                        parse_mode="Markdown"
+                    )
+                    found_otp = True
+                    break
+            mail.logout()
+            if found_otp:
+                return
+        except Exception as e:
+            continue
+    await q.message.reply_text("❌ No OTP found for alias.")
 
+# ✅ Replace with your token
 BOT_TOKEN = "7915387166:AAFeGRGme39-znPBxDLOu8BrHheqsOWUIR4"
 app = ApplicationBuilder().token(BOT_TOKEN).build()
 app.add_handler(CommandHandler("start", start))
