@@ -1,27 +1,22 @@
 
+# ✅ Telegram 2FA Bot with Alias Email OTP + QR Secret Key using config.json
+
 import re
 import imaplib
 import email
 import pyotp
+import json
 import requests
 import urllib.parse
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
 from telegram.ext import ApplicationBuilder, CommandHandler, MessageHandler, CallbackQueryHandler, ContextTypes, filters
 
-EMAIL_ACCOUNTS = {
-    "gmail.com": [
-        {"email": "your.email@gmail.com", "password": "your_app_pwd", "imap": "imap.gmail.com"},
-    ],
-    "yandex.com": [
-        {"email": "your.yandex@yandex.com", "password": "your_yandex_pwd", "imap": "imap.yandex.com"},
-    ],
-    "zoho.com": [
-        {"email": "your.zoho@zohomail.com", "password": "your_zoho_pwd", "imap": "imap.zoho.com"},
-    ],
-    "hotmail.com": [
-        {"email": "your.hotmail@hotmail.com", "password": "your_hotmail_pwd", "imap": "imap-mail.outlook.com"},
-    ],
-}
+# 🔧 Load config from JSON
+with open("config.json") as f:
+    CONFIG = json.load(f)
+
+EMAIL_ACCOUNTS = CONFIG["EMAIL_ACCOUNTS"]
+BOT_TOKEN = CONFIG["BOT_TOKEN"]
 
 user_aliases = {}
 user_secrets = {}
@@ -31,13 +26,9 @@ def get_domain(email):
 
 def get_keyboard():
     return InlineKeyboardMarkup([
-        [
-            InlineKeyboardButton("QR Secret", callback_data="show_secret"),
-            InlineKeyboardButton("OTP", callback_data="show_otp")
-        ],
-        [
-            InlineKeyboardButton("Mail OTP", callback_data="mail_otp")
-        ]
+        [InlineKeyboardButton("📤 QR Secret", callback_data="show_secret"),
+         InlineKeyboardButton("📲 OTP", callback_data="show_otp")],
+        [InlineKeyboardButton("📩 Mail OTP", callback_data="mail_otp")]
     ])
 
 def detect_service(label):
@@ -49,26 +40,25 @@ def detect_service(label):
     return "Other 2FA"
 
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    await update.message.reply_text("Welcome! Send your alias email or QR/Secret Key.")
+    await update.message.reply_text("👋 Welcome! Send your alias email (e.g. cambo.ads+123@gmail.com) or QR/Secret Key.")
 
 async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
     text = update.message.text.strip()
     if '@' in text:
         user_aliases[update.effective_user.id] = text
-        await update.message.reply_text("Alias saved.", reply_markup=get_keyboard())
+        await update.message.reply_text("✅ Alias saved.", reply_markup=get_keyboard())
     elif re.fullmatch(r'[A-Z2-7]{16,}', text.upper()):
         user_secrets[update.effective_user.id] = text.upper()
         context.user_data['label'] = "Manual Entry"
         context.user_data['service'] = "Manual 2FA"
-        await update.message.reply_text("Secret Key saved.", reply_markup=get_keyboard())
+        await update.message.reply_text("✅ Secret Key saved.", reply_markup=get_keyboard())
     else:
-        await update.message.reply_text("Invalid input.")
+        await update.message.reply_text("⚠️ Invalid input.")
 
 async def handle_photo(update: Update, context: ContextTypes.DEFAULT_TYPE):
     file = await update.message.photo[-1].get_file()
-    file_path = "qr.jpg"
-    await file.download_to_drive(file_path)
-    with open(file_path, "rb") as f:
+    await file.download_to_drive("qr.jpg")
+    with open("qr.jpg", "rb") as f:
         r = requests.post("https://api.qrserver.com/v1/read-qr-code/", files={"file": f})
     try:
         data = r.json()[0]["symbol"][0]["data"]
@@ -82,14 +72,14 @@ async def handle_photo(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 user_secrets[update.effective_user.id] = secret
                 context.user_data['label'] = label
                 context.user_data['service'] = service
-                await update.message.reply_text(f"{service} for {label}
-Secret: {secret}", reply_markup=get_keyboard())
+await update.message.reply_text(f"✅ {service} for *{label}*`")
+ Secret: `{secret}`", parse_mode="Markdown", reply_markup=get_keyboard())
             else:
-                await update.message.reply_text("No valid Secret in QR.")
+                await update.message.reply_text("❌ No valid Secret in QR.")
         else:
-            await update.message.reply_text("QR unreadable.")
+            await update.message.reply_text("❌ QR unreadable.")
     except Exception as e:
-        await update.message.reply_text(f"Error reading QR: {str(e)}")
+        await update.message.reply_text(f"❌ Error reading QR: {str(e)}")
 
 async def handle_button(update: Update, context: ContextTypes.DEFAULT_TYPE):
     q = update.callback_query
@@ -100,26 +90,26 @@ async def handle_button(update: Update, context: ContextTypes.DEFAULT_TYPE):
         if secret:
             label = context.user_data.get("label", "Unknown")
             service = context.user_data.get("service", "2FA")
-            await q.message.reply_text(f"{service} for {label}
-Secret: {secret}")
+            await q.message.reply_text(f"✅ {service} for *{label}*
+ Secret: `{secret}`", parse_mode="Markdown")
         else:
-            await q.message.reply_text("No Secret found.")
+            await q.message.reply_text("⚠️ No Secret found.")
     elif q.data == "show_otp":
         secret = user_secrets.get(uid)
         if secret:
             otp = pyotp.TOTP(secret).now()
-            await q.message.reply_text(f"OTP: {otp}")
+            await q.message.reply_text(f" OTP: `{otp}`", parse_mode="Markdown")
         else:
-            await q.message.reply_text("No Secret found.")
+            await q.message.reply_text("⚠️ No Secret found.")
     elif q.data == "mail_otp":
         alias = user_aliases.get(uid)
         if not alias:
-            await q.message.reply_text("Alias email not set.")
+            await q.message.reply_text("⚠️ Alias email not set.")
             return
         domain = get_domain(alias)
         accounts = EMAIL_ACCOUNTS.get(domain)
         if not accounts:
-            await q.message.reply_text("Domain not supported.")
+            await q.message.reply_text("❌ Domain not supported.")
             return
         for acc in accounts:
             try:
@@ -140,16 +130,16 @@ Secret: {secret}")
                             break
                 else:
                     body = msg.get_payload(decode=True).decode()
-                otp_match = re.search(r'\b(\d{6})\b', body)
+                otp_match = re.search(r'(\d{6})', body)
                 if otp_match:
                     otp = otp_match.group(1)
-                    await q.message.reply_text(f"Mail OTP: {otp}")
+                    await q.message.reply_text(f"✉️ Mail OTP: `{otp}`", parse_mode="Markdown")
                     return
             except:
                 continue
-        await q.message.reply_text("No OTP found for alias.")
+        await q.message.reply_text("❌ No OTP found for alias.")
 
-BOT_TOKEN = "7915387166:AAFeGRGme39-znPBxDLOu8BrHheqsOWUIR4"
+# ✅ Init and run bot
 app = ApplicationBuilder().token(BOT_TOKEN).build()
 app.add_handler(CommandHandler("start", start))
 app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_text))
