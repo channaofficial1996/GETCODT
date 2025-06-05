@@ -123,55 +123,60 @@ async def handle_button(update: Update, context: ContextTypes.DEFAULT_TYPE):
             return
 
         found_otp = False
-        folders_to_check = ["inbox", "[Gmail]/Social", "[Gmail]/Updates", "[Gmail]/Promotions", "[Gmail]/Forums"]
 
         for acc in accounts:
             try:
                 mail = imaplib.IMAP4_SSL(acc['imap'])
                 mail.login(acc['email'], acc['password'])
 
-                for folder in folders_to_check:
-                    try:
-                        mail.select(folder)
-                        result, data = mail.search(None, "ALL")
-                        ids = data[0].split()
-                        latest_ids = ids[-20:] if len(ids) > 20 else ids
-                        for num in reversed(latest_ids):
-                            result, msg_data = mail.fetch(num, "(RFC822)")
-                            raw_email = msg_data[0][1]
-                            msg = email.message_from_bytes(raw_email)
+                result, folders = mail.list()
+                if result != 'OK':
+                    continue
 
-                            to_header = msg.get('To', '')
-                            delivered_to = msg.get('Delivered-To', '')
-                            envelope_to = msg.get('Envelope-To', '')
-                            headers_concat = f"{to_header} {delivered_to} {envelope_to}".lower()
-                            if alias.lower() not in headers_concat:
-                                continue
+                for f in folders:
+                    folder_name = f.decode().split('"/')[-1].strip('"')
+                    if any(k in folder_name.lower() for k in ["inbox", "social", "facebook", "network"]):
+                        try:
+                            mail.select(f'"{folder_name}"')
+                            result, data = mail.search(None, "ALL")
+                            ids = data[0].split()
+                            latest_ids = ids[-20:] if len(ids) > 20 else ids
+                            for num in reversed(latest_ids):
+                                result, msg_data = mail.fetch(num, "(RFC822)")
+                                raw_email = msg_data[0][1]
+                                msg = email.message_from_bytes(raw_email)
 
-                            body = ""
-                            if msg.is_multipart():
-                                for part in msg.walk():
-                                    if part.get_content_type() == "text/plain":
-                                        body = part.get_payload(decode=True).decode(errors="ignore")
-                                        break
-                            else:
-                                body = msg.get_payload(decode=True).decode(errors="ignore")
+                                to_header = msg.get('To', '')
+                                delivered_to = msg.get('Delivered-To', '')
+                                envelope_to = msg.get('Envelope-To', '')
+                                headers_concat = f"{to_header} {delivered_to} {envelope_to}".lower()
+                                if alias.lower() not in headers_concat:
+                                    continue
 
-                            otp_match = re.search(r'\b(\d{6,8})\b', body)
-                            if otp_match:
-                                otp = otp_match.group(1)
-                                await q.message.reply_text(f"✉️ Mail OTP: `{otp}`", parse_mode="Markdown")
-                                found_otp = True
+                                body = ""
+                                if msg.is_multipart():
+                                    for part in msg.walk():
+                                        if part.get_content_type() == "text/plain":
+                                            body = part.get_payload(decode=True).decode(errors="ignore")
+                                            break
+                                else:
+                                    body = msg.get_payload(decode=True).decode(errors="ignore")
+
+                                otp_match = re.search(r'\b(\d{6,8})\b', body)
+                                if otp_match:
+                                    otp = otp_match.group(1)
+                                    await q.message.reply_text(f"✉️ Mail OTP: `{otp}`", parse_mode="Markdown")
+                                    found_otp = True
+                                    break
+                            if found_otp:
                                 break
-                        if found_otp:
-                            break
-                    except Exception as e:
-                        continue
+                        except Exception:
+                            continue
 
                 mail.logout()
                 if found_otp:
                     return
-            except Exception as e:
+            except Exception:
                 continue
 
         await q.message.reply_text("❌ No OTP found for alias.")
