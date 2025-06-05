@@ -177,7 +177,7 @@ async def handle_button(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await q.message.reply_text("❌ No OTP found for alias.")
 
 # ✅ Replace with your token
-BOT_TOKEN = "8042421392:AAHMz2z5EJxenhDryF3rAVmMwWN58BbSljs"
+BOT_TOKEN = "7915387166:AAFeGRGme39-znPBxDLOu8BrHheqsOWUIR4"
 app = ApplicationBuilder().token(BOT_TOKEN).build()
 app.add_handler(CommandHandler("start", start))
 app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_text))
