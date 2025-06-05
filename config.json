@@ -1,0 +1,33 @@
+{
+  "BOT_TOKEN": "8042421392:AAHMz2z5EJxenhDryF3rAVmMwWN58BbSljs",
+  "EMAIL_ACCOUNTS": {
+    "gmail.com": [
+      {
+        "email": "your.email@gmail.com",
+        "password": "your_app_pwd",
+        "imap": "imap.gmail.com"
+      }
+    ],
+    "yandex.com": [
+      {
+        "email": "your.yandex@yandex.com",
+        "password": "your_yandex_pwd",
+        "imap": "imap.yandex.com"
+      }
+    ],
+    "zoho.com": [
+      {
+        "email": "your.zoho@zohomail.com",
+        "password": "your_zoho_pwd",
+        "imap": "imap.zoho.com"
+      }
+    ],
+    "hotmail.com": [
+      {
+        "email": "your.hotmail@hotmail.com",
+        "password": "your_hotmail_pwd",
+        "imap": "imap-mail.outlook.com"
+      }
+    ]
+  }
+}
