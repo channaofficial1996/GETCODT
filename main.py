@@ -92,7 +92,7 @@ async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await update.message.reply_text("✅ Secret Key saved.", reply_markup=get_reply_keyboard())
         return
 
-    elif text == "📲 2FA OTP":
+   elif text == "📲 2FA OTP":
     secret = user_secrets.get(user_id)
     c = user_context.get(user_id, {})
     if secret:
@@ -105,6 +105,7 @@ async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
         )
     else:
         await update.message.reply_text("⚠️ No Secret Key saved.")
+
 
     elif text == "📩 Mail OTP":
         # 🟢 Add pop-up: Wait 10 seconds before fetching
