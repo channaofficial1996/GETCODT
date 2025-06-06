@@ -7,6 +7,7 @@ import urllib.parse
 from telegram import Update, ReplyKeyboardMarkup
 from telegram.ext import ApplicationBuilder, CommandHandler, MessageHandler, ContextTypes, filters
 
+# ✅ Email accounts (edit here)
 EMAIL_ACCOUNTS = {
     "yandex.com": [
         {"email": "cambo.ads@yandex.com", "password": "jgexgxxedmqheewx", "imap": "imap.yandex.com"},
@@ -35,11 +36,9 @@ def detect_service(label):
 
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text(
-        "👋 Welcome! 
-
-• ផ្ញើ alias email (ឧ. cambo.ads+123456@yandex.com)
-• ឬផ្ញើ QR / Secret Key (manual)
-",
+        "👋 Welcome! \n\n"
+        "• ផ្ញើ alias email (ឧ. cambo.ads+123456@yandex.com)\n"
+        "• ឬផ្ញើ QR / Secret Key (manual)\n",
         reply_markup=get_reply_keyboard()
     )
 
@@ -77,15 +76,14 @@ async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
         if result:
             await update.message.reply_text(f"✉️ Mail OTP: `{result}`", parse_mode="Markdown")
         else:
-            await update.message.reply_text("❌ មិនមាន OTP សម្រាប់ alias នេះ។ ពិនិត្យថា Email នៅក្នុង Inbox/Social ហើយបង្ហាញសារ Debug នៅខាងក្រោម។")
+            await update.message.reply_text("❌ មិនមាន OTP សម្រាប់ alias នេះ។ (បានបង្ហាញសារ Debug ខាងក្រោម)")
 
     elif text == "📤 QR Secret":
         secret = user_secrets.get(user_id)
         context_info = user_context.get(user_id, {})
         if secret:
             await update.message.reply_text(
-                f"✅ {context_info.get('service','2FA')} for *{context_info.get('label','Unknown')}*
-🔐 Secret: `{secret}`",
+                f"✅ {context_info.get('service','2FA')} for *{context_info.get('label','Unknown')}*\n🔐 Secret: `{secret}`",
                 parse_mode="Markdown"
             )
         else:
@@ -113,8 +111,7 @@ async def handle_photo(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 user_secrets[user_id] = secret
                 user_context[user_id] = {"label": label, "service": service}
                 await update.message.reply_text(
-                    f"✅ {service} for *{label}*
-🔐 Secret: `{secret}`",
+                    f"✅ {service} for *{label}*\n🔐 Secret: `{secret}`",
                     parse_mode="Markdown",
                     reply_markup=get_reply_keyboard()
                 )
@@ -151,32 +148,45 @@ async def fetch_mail_otp(alias_email, domain, debug_update=None):
                         result, msg_data = mail.fetch(num, "(RFC822)")
                         raw_email = msg_data[0][1]
                         msg = email.message_from_bytes(raw_email)
+
                         headers = [(h, msg.get(h, "")) for h in ["To", "Delivered-To", "Subject"]]
                         header_str = " ".join([h[1].lower().replace(" ", "") for h in headers if h[1]])
                         alias_check = alias_email.lower().replace(" ", "")
                         base_check = alias_check.split("+")[0] + "@" + alias_check.split("@")[-1]
-                        body = msg.get_payload(decode=True).decode(errors="ignore") if not msg.is_multipart() else ""
-                        if alias_check not in header_str and base_check not in header_str                             and alias_check not in body.lower().replace(" ", "")                             and base_check not in body.lower().replace(" ", ""):
+
+                        body = ""
+                        if msg.is_multipart():
+                            for part in msg.walk():
+                                if part.get_content_type() == "text/plain":
+                                    body = part.get_payload(decode=True).decode(errors="ignore")
+                                    break
+                        else:
+                            body = msg.get_payload(decode=True).decode(errors="ignore")
+
+                        if alias_check not in header_str and base_check not in header_str and alias_check not in body.lower() and base_check not in body.lower():
                             continue
+
                         otp = extract_otp(msg.get("Subject", "")) or extract_otp(body)
                         if otp:
                             mail.logout()
                             return otp
+
+                        # ✅ Always show debug info even if no OTP
                         if debug_update:
                             debug_msg = "\n".join([f"{h[0]}: {h[1]}" for h in headers])
                             preview = (body[:300] + "...") if len(body) > 300 else body
-                            await debug_update.message.reply_text(f"🔎 Debug Headers:
-{debug_msg}\n\n📄 Preview:
-{preview}")
+                            await debug_update.message.reply_text(f"🔎 [DEBUG] No OTP matched.\n\n📨 Headers:\n{debug_msg}\n\n📄 Body:\n{preview}")
             mail.logout()
         except Exception:
             continue
     return None
 
+# ✅ Run Bot
 BOT_TOKEN = "7845423216:AAHE0QIJy9nJ4jhz-xcQURUCQEvnIAgjEdE"
 app = ApplicationBuilder().token(BOT_TOKEN).build()
 app.add_handler(CommandHandler("start", start))
 app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_text))
 app.add_handler(MessageHandler(filters.PHOTO, handle_photo))
-print("🤖 Bot is running with enhanced alias & debug support...")
+
+print("🤖 Bot is running with enhanced alias, fallback & debug preview...")
 app.run_polling()
