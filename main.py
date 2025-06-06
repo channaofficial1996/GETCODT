@@ -26,7 +26,7 @@ recent_otp_cache = {}
 
 def get_reply_keyboard():
     return ReplyKeyboardMarkup(
-        [["📤 QR Secret Key", "📲 2FA OTP", "📩 Mail OTP"]],
+        [["📤QR GET KEY", "📲 2FA OTP", "📩 Mail OTP"]],
         resize_keyboard=True
     )
 
@@ -93,16 +93,22 @@ async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
         return
 
     elif text == "📲 2FA OTP":
-        secret = user_secrets.get(user_id)
-        if secret:
-            otp = pyotp.TOTP(secret).now()
-            await update.message.reply_text(f"🔐 OTP: `{otp}`", parse_mode="Markdown")
-        else:
-            await update.message.reply_text("⚠️ No Secret Key saved.")
+    secret = user_secrets.get(user_id)
+    c = user_context.get(user_id, {})
+    if secret:
+        otp = pyotp.TOTP(secret).now()
+        label = c.get("label", "Unknown")
+        service = c.get("service", "2FA")
+        await update.message.reply_text(
+            f"🔑 {service} for *{label}*\n🔐 OTP: `{otp}`",
+            parse_mode="Markdown"
+        )
+    else:
+        await update.message.reply_text("⚠️ No Secret Key saved.")
 
     elif text == "📩 Mail OTP":
         # 🟢 Add pop-up: Wait 10 seconds before fetching
-        await update.message.reply_text("⌛ សូមរងចាំ ១០ វិនាទី មុននឹងចុច Mail OTP ដើម្បីទទួលកូដថ្មី!", reply_markup=get_reply_keyboard())
+        await update.message.reply_text("⌛ សូមរងចាំ ១០ វិនាទី ដើម្បីទទួលកូដ OTP !", reply_markup=get_reply_keyboard())
         await asyncio.sleep(10)  # Wait 10 seconds to allow new mail to arrive
 
         alias = user_aliases.get(user_id)
