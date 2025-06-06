@@ -4,10 +4,10 @@ import email
 import pyotp
 import requests
 import urllib.parse
+import asyncio
 from telegram import Update, ReplyKeyboardMarkup
 from telegram.ext import ApplicationBuilder, CommandHandler, MessageHandler, ContextTypes, filters
 
-# ✅ Email Accounts for OTP Fetching
 EMAIL_ACCOUNTS = {
     "yandex.com": [
         {"email": "cambo.ads@yandex.com", "password": "jgexgxxedmqheewx", "imap": "imap.yandex.com"},
@@ -19,13 +19,11 @@ EMAIL_ACCOUNTS = {
     ],
 }
 
-# ✅ In-memory session storage
 user_aliases = {}
 user_secrets = {}
 user_context = {}
-recent_otp_cache = {}  # to prevent repeating same OTP
-
-# ✅ Keyboard UI
+user_alias_set_time = {}
+user_last_otp = {}
 
 def get_reply_keyboard():
     return ReplyKeyboardMarkup(
@@ -40,16 +38,12 @@ def detect_service(label):
     if 'zoho' in l: return "Zoho 2FA"
     return "Other 2FA"
 
-# ✅ Start
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text(
-        """👋 Welcome!\n\n• ផ្ញើ alias email (ឧ. cambo.ads+123456@yandex.com)
-• ឬផ្ញើ QR / Secret Key (manual)
-""",
+        "👋 Welcome!\n\n• ផ្ញើ alias email (ឧ. cambo.ads+123456@yandex.com)\n• ឬផ្ញើ QR / Secret Key (manual)",
         reply_markup=get_reply_keyboard()
     )
 
-# ✅ Handle QR image
 async def handle_photo(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_id = update.effective_user.id
     file = await update.message.photo[-1].get_file()
@@ -58,6 +52,7 @@ async def handle_photo(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     with open(file_path, "rb") as f:
         r = requests.post("https://api.qrserver.com/v1/read-qr-code/", files={"file": f})
+
     try:
         data = r.json()[0]["symbol"][0]["data"]
         if data:
@@ -81,14 +76,19 @@ async def handle_photo(update: Update, context: ContextTypes.DEFAULT_TYPE):
     except Exception as e:
         await update.message.reply_text(f"❌ Error reading QR: {str(e)}")
 
-# ✅ Handle text
 async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_id = update.effective_user.id
     text = update.message.text.strip()
 
     if "+" in text and ("@yandex.com" in text or "@zohomail.com" in text):
+        text = text.lower()
+        old_alias = user_aliases.get(user_id, "")
+        if old_alias == text:
+            await update.message.reply_text(f"✅ Alias `{text}` ត្រូវបានកំណត់រួចម្តងហើយ។", parse_mode="Markdown", reply_markup=get_reply_keyboard())
+            return
         user_aliases[user_id] = text
-        await update.message.reply_text(f"✅ Alias `{text}` ត្រូវបានកំណត់។", parse_mode="Markdown", reply_markup=get_reply_keyboard())
+        user_alias_set_time[user_id] = context.application.loop.time()
+        await update.message.reply_text(f"✅ Alias `{text}` ត្រូវបានកំណត់។\nសូមរងចាំ 10 វិនាទី មុនចុច Mail OTP", parse_mode="Markdown", reply_markup=get_reply_keyboard())
         return
 
     elif re.fullmatch(r'[A-Z2-7]{16,}', text.upper()):
@@ -98,7 +98,7 @@ async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await update.message.reply_text("✅ Secret Key saved.", reply_markup=get_reply_keyboard())
         return
 
-    elif text == "📲 OTP":
+    elif text == "📲 2FA OTP":
         secret = user_secrets.get(user_id)
         if secret:
             otp = pyotp.TOTP(secret).now()
@@ -111,6 +111,13 @@ async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
         if not alias:
             await update.message.reply_text("❌ សូមផ្ញើ alias email មុនសិន!")
             return
+
+        now = context.application.loop.time()
+        if user_id in user_alias_set_time and now - user_alias_set_time[user_id] < 10:
+            wait_sec = int(10 - (now - user_alias_set_time[user_id]))
+            await update.message.reply_text(f"⏳ សូមរងចាំ {wait_sec} វិនាទី មុនចុច Mail OTP")
+            return
+
         domain = alias.split("@")[1].lower()
         result = await fetch_mail_otp(alias, domain, user_id, debug_update=update)
         if result:
@@ -118,7 +125,7 @@ async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
         else:
             await update.message.reply_text("❌ មិនមាន OTP សម្រាប់ alias នេះ។ (ប្រាកដថាសារមាន Debug ចង់ស្រាវជ្រាវ)")
 
-    elif text == "📤 QR Secret":
+    elif text == "📤 QR Secret Key":
         secret = user_secrets.get(user_id)
         c = user_context.get(user_id, {})
         if secret:
@@ -132,13 +139,8 @@ async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
     else:
         await update.message.reply_text("⚠️ Input មិនត្រឹមត្រូវ។")
 
-# ✅ Extract OTP
-
 def extract_otp(text):
-    match = re.search(r'\b\d{4,8}\b', text)
-    return match.group(0) if match else None
-
-# ✅ Fetch OTP via IMAP
+    return re.search(r'\b\d{4,8}\b', text).group(0) if re.search(r'\b\d{4,8}\b', text) else None
 
 async def fetch_mail_otp(alias_email, domain, user_id, debug_update=None):
     accounts = EMAIL_ACCOUNTS.get(domain)
@@ -147,86 +149,51 @@ async def fetch_mail_otp(alias_email, domain, user_id, debug_update=None):
 
     for acc in accounts:
         try:
-            mail = imaplib.IMAP4_SSL(acc['imap'])
-            mail.login(acc['email'], acc['password'])
+            mail = imaplib.IMAP4_SSL(acc["imap"])
+            mail.login(acc["email"], acc["password"])
             mail.select("inbox")
-            result, data = mail.search(None, "ALL")
-            ids = data[0].split()[-20:]
 
-            for num in reversed(ids):
+            result, data = mail.search(None, "ALL")
+            mail_ids = data[0].split()[-25:]
+
+            for num in reversed(mail_ids):
                 result, msg_data = mail.fetch(num, "(RFC822)")
                 raw_email = msg_data[0][1]
                 msg = email.message_from_bytes(raw_email)
 
-                all_headers = [
-                    msg.get("To", ""), msg.get("Delivered-To", ""),
-                    msg.get("X-Envelope-To", ""), msg.get("X-Yandex-Forward", ""),
-                    msg.get("Cc", ""), msg.get("Bcc", "")
-                ]
-                header_str = " ".join([h.lower().replace(" ", "") for h in all_headers if h])
-                alias_check = alias_email.lower().replace(" ", "")
-                base_check = alias_check.split("+")[0] + "@" + alias_check.split("@")[1]
+                headers = [(h, msg.get(h, "")) for h in ["From", "To", "Delivered-To", "Subject"]]
+                header_str = " ".join([h[1].lower().replace(" ", "") for h in headers if h[1]])
+                base_check = alias_email.lower().replace(" ", "").split("+")[0] + "@" + alias_email.lower().split("@")[1]
+                if alias_email.lower().replace(" ", "") not in header_str and base_check not in header_str:
+                    continue
 
-                if alias_check not in header_str and base_check not in header_str:
-                    body = ""
-                    if msg.is_multipart():
-                        for part in msg.walk():
-                            if part.get_content_type() == "text/plain":
-                                body = part.get_payload(decode=True).decode(errors='ignore')
-                                break
-                    else:
-                        body = msg.get_payload(decode=True).decode(errors='ignore')
-
-                    if alias_check not in body.lower().replace(" ", "") and base_check not in body.lower().replace(" ", ""):
-                        continue
-
-                subject = msg.get("Subject", "")
                 body = ""
                 if msg.is_multipart():
                     for part in msg.walk():
                         if part.get_content_type() == "text/plain":
-                            body = part.get_payload(decode=True).decode(errors='ignore')
+                            body = part.get_payload(decode=True).decode(errors="ignore")
                             break
                 else:
-                    body = msg.get_payload(decode=True).decode(errors='ignore')
+                    body = msg.get_payload(decode=True).decode(errors="ignore")
 
-                otp = extract_otp(subject) or extract_otp(body)
+                otp = extract_otp(msg.get("Subject", "")) or extract_otp(body)
                 if otp:
-                    # prevent repeat
-                    if recent_otp_cache.get(user_id) == otp:
-                        continue
-                    recent_otp_cache[user_id] = otp
-
                     sender = msg.get("From", "Unknown")
-                    short_type = "សោរសុវត្ថិភាព"
-                    if "reset" in subject.lower():
-                        short_type = "សំណើកែពាក្យសម្ងាត់"
-                    elif "login" in subject.lower():
-                        short_type = "ចូលគណនី"
-                    elif "code" in subject.lower():
-                        short_type = "Security Code"
+                    reason = "ប្រតិបត្តិការសុវត្ថិភាព" if "login" in body.lower() else "សំណើប្តូរពាក្យសម្ងាត់" if "change" in body.lower() else "សំណើផ្ទៀងផ្ទាត់"
+                    key = f"{user_id}:{otp}:{sender}"
+                    if user_last_otp.get(user_id) == key:
+                        continue
+                    user_last_otp[user_id] = key
+                    return f"📩 OTP: `{otp}`\nFrom: `{sender}`\nប្រភព: {reason}"
 
-                    return f"✉️ OTP: `{otp}`\nFrom: `{sender}`\nប្រភេទ: *{short_type}*"
-
-                if debug_update:
-                    debug_msg = "\n".join([f"{k}: {v}" for k, v in zip([
-                        "To", "Delivered-To", "Cc", "Subject"], all_headers + [subject])])
-                    await debug_update.message.reply_text(f"🔎 Debug Headers & Preview:\n{debug_msg}\n\nBody:\n{body[:300]}")
-
-            mail.logout()
-        except Exception as e:
-            if debug_update:
-                await debug_update.message.reply_text(f"❌ IMAP Error: {e}")
+        except Exception:
             continue
-
     return None
 
-# ✅ Run bot
 BOT_TOKEN = "7845423216:AAHE0QIJy9nJ4jhz-xcQURUCQEvnIAgjEdE"
 app = ApplicationBuilder().token(BOT_TOKEN).build()
 app.add_handler(CommandHandler("start", start))
 app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_text))
 app.add_handler(MessageHandler(filters.PHOTO, handle_photo))
-
-print("🤖 Bot is running with QR + Email Alias OTP support...")
+print("🤖 Bot is running...")
 app.run_polling()
