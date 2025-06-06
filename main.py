@@ -4,8 +4,8 @@ import email
 import pyotp
 import requests
 import urllib.parse
-from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup, ReplyKeyboardMarkup
-from telegram.ext import ApplicationBuilder, CommandHandler, MessageHandler, CallbackQueryHandler, ContextTypes, filters
+from telegram import Update, ReplyKeyboardMarkup
+from telegram.ext import ApplicationBuilder, CommandHandler, MessageHandler, ContextTypes, filters
 
 # --------- EDIT EMAIL ACCOUNTS HERE ---------
 EMAIL_ACCOUNTS = {
@@ -35,12 +35,11 @@ user_context = {}
 def get_domain(email):
     return email.split('@')[-1].lower()
 
-def get_keyboard():
-    return InlineKeyboardMarkup([
-        [InlineKeyboardButton("📤 QR Secret", callback_data="show_secret"),
-         InlineKeyboardButton("📲 OTP", callback_data="show_otp")],
-        [InlineKeyboardButton("📩 Mail OTP", callback_data="mail_otp")]
-    ])
+def get_reply_keyboard():
+    return ReplyKeyboardMarkup(
+        [["📤 QR Secret", "📲 OTP", "📩 Mail OTP"]],
+        resize_keyboard=True
+    )
 
 def detect_service(label):
     l = label.lower()
@@ -55,7 +54,7 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
         "👋 Welcome! \n\n"
         "• ផ្ញើ alias email (ឧ. cambo.ads+123456@yandex.com)\n"
         "• ឬផ្ញើ QR / Secret Key (manual)\n",
-        reply_markup=ReplyKeyboardMarkup([["Get OTP"]], resize_keyboard=True)
+        reply_markup=get_reply_keyboard()
     )
 
 async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -64,17 +63,29 @@ async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     if "+" in text and any(text.endswith(f"@{d}") for d in EMAIL_ACCOUNTS):
         user_aliases[user_id] = text
-        await update.message.reply_text(f"✅ Alias `{text}` ត្រូវបានកំណត់។", parse_mode="Markdown", reply_markup=get_keyboard())
+        await update.message.reply_text(
+            f"✅ Alias `{text}` ត្រូវបានកំណត់។",
+            parse_mode="Markdown",
+            reply_markup=get_reply_keyboard()
+        )
         return
 
     elif re.fullmatch(r'[A-Z2-7]{16,}', text.upper()):
         secret = text.upper()
         user_secrets[user_id] = secret
         user_context[user_id] = {"label": "Manual Entry", "service": "Manual 2FA"}
-        await update.message.reply_text("✅ Secret Key saved.", reply_markup=get_keyboard())
+        await update.message.reply_text("✅ Secret Key saved.", reply_markup=get_reply_keyboard())
         return
 
-    elif text.lower() == "get otp":
+    elif text == "📲 OTP":
+        secret = user_secrets.get(user_id)
+        if secret:
+            otp = pyotp.TOTP(secret).now()
+            await update.message.reply_text(f"🔐 OTP: `{otp}`", parse_mode="Markdown")
+        else:
+            await update.message.reply_text("⚠️ No Secret Key saved.")
+
+    elif text == "📩 Mail OTP":
         alias = user_aliases.get(user_id)
         if not alias:
             await update.message.reply_text("❌ សូមផ្ញើ alias email មុនសិន!")
@@ -82,12 +93,24 @@ async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
         domain = get_domain(alias)
         result = await fetch_mail_otp(alias, domain, debug_update=update)
         if result:
-            await update.message.reply_text(f"🔐 OTP សម្រាប់ `{alias}` គឺ: `{result}`", parse_mode="Markdown")
+            await update.message.reply_text(f"✉️ Mail OTP: `{result}`", parse_mode="Markdown")
         else:
             await update.message.reply_text("❌ មិនមាន OTP សម្រាប់ alias នេះ")
         return
 
-    await update.message.reply_text("⚠️ Input មិនត្រឹមត្រូវ។")
+    elif text == "📤 QR Secret":
+        c = user_context.get(user_id, {})
+        secret = user_secrets.get(user_id)
+        if secret:
+            await update.message.reply_text(
+                f"✅ {c.get('service','2FA')} for *{c.get('label','Unknown')}*\n🔐 Secret: `{secret}`",
+                parse_mode="Markdown"
+            )
+        else:
+            await update.message.reply_text("⚠️ No Secret Key saved.")
+
+    else:
+        await update.message.reply_text("⚠️ Input មិនត្រឹមត្រូវ។")
 
 async def handle_photo(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_id = update.effective_user.id
@@ -108,7 +131,10 @@ async def handle_photo(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 user_secrets[user_id] = secret
                 user_context[user_id] = {"label": label, "service": service}
                 await update.message.reply_text(
-                    f"✅ {service} for *{label}*\n🔐 Secret: `{secret}`", parse_mode="Markdown", reply_markup=get_keyboard())
+                    f"✅ {service} for *{label}*\n🔐 Secret: `{secret}`",
+                    parse_mode="Markdown",
+                    reply_markup=get_reply_keyboard()
+                )
             else:
                 await update.message.reply_text("❌ No valid Secret in QR.")
         else:
@@ -116,43 +142,8 @@ async def handle_photo(update: Update, context: ContextTypes.DEFAULT_TYPE):
     except Exception as e:
         await update.message.reply_text(f"❌ Error reading QR: {str(e)}")
 
-async def handle_button(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    q = update.callback_query
-    await q.answer()
-    user_id = q.from_user.id
-
-    if q.data == "show_secret":
-        secret = user_secrets.get(user_id)
-        c = user_context.get(user_id, {})
-        if secret:
-            await q.message.reply_text(
-                f"✅ {c.get('service','2FA')} for *{c.get('label','Unknown')}*\n🔐 Secret: `{secret}`", parse_mode="Markdown")
-        else:
-            await q.message.reply_text("⚠️ No Secret found.")
-
-    elif q.data == "show_otp":
-        secret = user_secrets.get(user_id)
-        if secret:
-            otp = pyotp.TOTP(secret).now()
-            await q.message.reply_text(f"🔐 OTP: `{otp}`", parse_mode="Markdown")
-        else:
-            await q.message.reply_text("⚠️ No Secret found.")
-
-    elif q.data == "mail_otp":
-        alias = user_aliases.get(user_id)
-        if not alias:
-            await q.message.reply_text("⚠️ Alias email not set.")
-            return
-        domain = get_domain(alias)
-        result = await fetch_mail_otp(alias, domain, debug_update=q)
-        if result:
-            await q.message.reply_text(f"✉️ Mail OTP: `{result}`", parse_mode="Markdown")
-        else:
-            await q.message.reply_text("❌ No OTP found for alias.")
-
-# --------- OTP Extraction Logic ---------
+# --------- OTP Extraction ---------
 def extract_otp(text):
-    # Accept patterns like 123456 or 123-456
     match = re.search(r'\b(\d{3}[-\s]?\d{3,5})\b', text)
     return match.group(1).replace('-', '').replace(' ', '') if match else None
 
@@ -184,6 +175,7 @@ async def fetch_mail_otp(alias_email, domain, debug_update=None):
                             headers = [(h, msg.get(h, "")) for h in ["To", "Delivered-To", "Envelope-To", "X-Yandex-Forward", "Cc", "Bcc", "Subject"]]
                             header_str = " ".join([h[1].lower().replace(" ", "").strip() for h in headers if h[1]])
                             alias_check = alias_email.lower().replace(" ", "").strip()
+                            base_check = alias_check.split("+")[0] + "@" + alias_check.split("@")[-1]
 
                             body = ""
                             if msg.is_multipart():
@@ -194,17 +186,15 @@ async def fetch_mail_otp(alias_email, domain, debug_update=None):
                             else:
                                 body = msg.get_payload(decode=True).decode(errors="ignore")
 
-                            # Force debug preview every time for clarity
+                            if alias_check not in header_str and base_check not in header_str \
+                               and alias_check not in body.lower().replace(" ", "") \
+                               and base_check not in body.lower().replace(" ", ""):
+                                continue
+
                             otp = extract_otp(msg.get("Subject", "")) or extract_otp(body)
                             if otp:
                                 mail.logout()
                                 return otp
-
-                            if debug_update:
-                                debug_msg = "\n".join([f"{h[0]}: {h[1]}" for h in headers])
-                                preview = (body[:300] + "...") if len(body) > 300 else body
-                                target = debug_update.message if hasattr(debug_update, "message") else debug_update
-                                await target.reply_text(f"🔎 [DEBUG] No OTP found.\n\n{debug_msg}\n\n📝 Body:\n{preview}")
                     except Exception:
                         continue
             mail.logout()
@@ -218,7 +208,6 @@ app = ApplicationBuilder().token(BOT_TOKEN).build()
 app.add_handler(CommandHandler("start", start))
 app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_text))
 app.add_handler(MessageHandler(filters.PHOTO, handle_photo))
-app.add_handler(CallbackQueryHandler(handle_button))
 
-print("🤖 Bot is running with QR/Secret + Alias Email OTP (Yandex, Zoho, Gmail, Hotmail, Outlook) Support...")
+print("🤖 Bot is running with QR/Secret + Alias Email OTP Support...")
 app.run_polling()
