@@ -1,4 +1,3 @@
-# ✅ Telegram 2FA Bot: QR/Secret Key, Manual, Alias Email OTP (Yandex, Gmail, Zoho, Hotmail, Outlook) with Header Debug
 import re
 import imaplib
 import email
@@ -10,12 +9,12 @@ from telegram.ext import ApplicationBuilder, CommandHandler, MessageHandler, Cal
 
 # --------- EDIT EMAIL ACCOUNTS HERE ---------
 EMAIL_ACCOUNTS = {
-    "gmail.com": [
-        {"email": "your.email@gmail.com", "password": "your_app_pwd", "imap": "imap.gmail.com"},
-    ],
     "yandex.com": [
         {"email": "cambo.ads@yandex.com", "password": "jgexgxxedmqheewx", "imap": "imap.yandex.com"},
         {"email": "n4.ra@yandex.com", "password": "xiipvzmwomunjvnl", "imap": "imap.yandex.com"},
+    ],
+    "gmail.com": [
+        {"email": "your.email@gmail.com", "password": "your_app_pwd", "imap": "imap.gmail.com"},
     ],
     "zoho.com": [
         {"email": "cambo.ads@zohomail.com", "password": "zoho_app_1", "imap": "imap.zoho.com"},
@@ -151,10 +150,13 @@ async def handle_button(update: Update, context: ContextTypes.DEFAULT_TYPE):
         else:
             await q.message.reply_text("❌ No OTP found for alias.")
 
+# --------- OTP Extraction Logic ---------
 def extract_otp(text):
-    m = re.search(r'\b(\d{5,8})\b', text)
-    return m.group(1) if m else None
+    # Accept patterns like 123456 or 123-456
+    match = re.search(r'\b(\d{3}[-\s]?\d{3,5})\b', text)
+    return match.group(1).replace('-', '').replace(' ', '') if match else None
 
+# --------- Mail OTP Core ---------
 async def fetch_mail_otp(alias_email, domain, debug_update=None):
     accounts = EMAIL_ACCOUNTS.get(domain)
     if not accounts:
@@ -183,21 +185,6 @@ async def fetch_mail_otp(alias_email, domain, debug_update=None):
                             header_str = " ".join([h[1].lower().replace(" ", "").strip() for h in headers if h[1]])
                             alias_check = alias_email.lower().replace(" ", "").strip()
 
-                            # Check headers and fallback to body
-                            if alias_check not in header_str:
-                                body = ""
-                                if msg.is_multipart():
-                                    for part in msg.walk():
-                                        if part.get_content_type() == "text/plain":
-                                            body = part.get_payload(decode=True).decode(errors="ignore")
-                                            break
-                                else:
-                                    body = msg.get_payload(decode=True).decode(errors="ignore")
-                                if alias_check not in body.lower().replace(" ", ""):
-                                    continue
-
-                            # Extract OTP
-                            subject = msg.get("Subject", "")
                             body = ""
                             if msg.is_multipart():
                                 for part in msg.walk():
@@ -206,15 +193,18 @@ async def fetch_mail_otp(alias_email, domain, debug_update=None):
                                         break
                             else:
                                 body = msg.get_payload(decode=True).decode(errors="ignore")
-                            otp = extract_otp(subject) or extract_otp(body)
+
+                            # Force debug preview every time for clarity
+                            otp = extract_otp(msg.get("Subject", "")) or extract_otp(body)
                             if otp:
                                 mail.logout()
                                 return otp
+
                             if debug_update:
-                                header_lines = "\n".join([f"{h[0]}: {h[1]}" for h in headers if h[1]])
-                                preview_body = (body[:300] + '...') if len(body) > 300 else body
-                                await debug_update.message.reply_text(
-                                    f"🔎 [DEBUG] No OTP found in matched email.\n\n{header_lines}\nBody:\n{preview_body}")
+                                debug_msg = "\n".join([f"{h[0]}: {h[1]}" for h in headers])
+                                preview = (body[:300] + "...") if len(body) > 300 else body
+                                target = debug_update.message if hasattr(debug_update, "message") else debug_update
+                                await target.reply_text(f"🔎 [DEBUG] No OTP found.\n\n{debug_msg}\n\n📝 Body:\n{preview}")
                     except Exception:
                         continue
             mail.logout()
@@ -222,7 +212,7 @@ async def fetch_mail_otp(alias_email, domain, debug_update=None):
             continue
     return None
 
-# --------- Main Entrypoint ---------
+# --------- BOT ENTRY POINT ---------
 BOT_TOKEN = "7845423216:AAHE0QIJy9nJ4jhz-xcQURUCQEvnIAgjEdE"
 app = ApplicationBuilder().token(BOT_TOKEN).build()
 app.add_handler(CommandHandler("start", start))
