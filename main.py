@@ -35,6 +35,7 @@ def detect_service(label):
     if 'facebook' in l: return "Facebook 2FA"
     if 'yandex' in l: return "Yandex 2FA"
     if 'zoho' in l: return "Zoho 2FA"
+    if 'google' in l or 'gmail' in l: return "Google 2FA"
     return "Other 2FA"
 
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -82,7 +83,11 @@ async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     if "+" in text and ("@yandex.com" in text or "@zohomail.com" in text):
         user_aliases[user_id] = text
-        await update.message.reply_text(f"✅ Alias `{text}` ត្រូវបានកំណត់។", parse_mode="Markdown", reply_markup=get_reply_keyboard())
+        await update.message.reply_text(
+            f"✅ Alias `{text}` ត្រូវបានកំណត់។\n\n⏳ សូមរងចាំ ១០ វិនាទី មុនចុច Mail OTP",
+            parse_mode="Markdown",
+            reply_markup=get_reply_keyboard()
+        )
         return
 
     elif re.fullmatch(r'[A-Z2-7]{16,}', text.upper()):
@@ -92,26 +97,26 @@ async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await update.message.reply_text("✅ Secret Key saved.", reply_markup=get_reply_keyboard())
         return
 
-   elif text == "📲 2FA OTP":
-    secret = user_secrets.get(user_id)
-    c = user_context.get(user_id, {})
-    if secret:
-        otp = pyotp.TOTP(secret).now()
-        label = c.get("label", "Unknown")
-        service = c.get("service", "2FA")
-        await update.message.reply_text(
-            f"🔑 {service} for *{label}*\n🔐 OTP: `{otp}`",
-            parse_mode="Markdown"
-        )
-    else:
-        await update.message.reply_text("⚠️ No Secret Key saved.")
-
+    elif text == "📲 2FA OTP":
+        secret = user_secrets.get(user_id)
+        c = user_context.get(user_id, {})
+        if secret:
+            otp = pyotp.TOTP(secret).now()
+            label = c.get("label", "Unknown")
+            service = c.get("service", "2FA")
+            await update.message.reply_text(
+                f"🔑 {service} for *{label}*\n🔐 OTP: `{otp}`",
+                parse_mode="Markdown"
+            )
+        else:
+            await update.message.reply_text("⚠️ No Secret Key saved.")
 
     elif text == "📩 Mail OTP":
-        # 🟢 Add pop-up: Wait 10 seconds before fetching
-        await update.message.reply_text("⌛ សូមរងចាំ ១០ វិនាទី ដើម្បីទទួលកូដ OTP !", reply_markup=get_reply_keyboard())
-        await asyncio.sleep(10)  # Wait 10 seconds to allow new mail to arrive
-
+        await update.message.reply_text(
+            "⌛ សូមរងចាំ ១០ វិនាទី ដើម្បីទទួលកូដ OTP !",
+            reply_markup=get_reply_keyboard()
+        )
+        await asyncio.sleep(10)
         alias = user_aliases.get(user_id)
         if not alias:
             await update.message.reply_text("❌ សូមផ្ញើ alias email មុនសិន!")
