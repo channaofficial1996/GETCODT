@@ -84,7 +84,7 @@ async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if "+" in text and ("@yandex.com" in text or "@zohomail.com" in text):
         user_aliases[user_id] = text
         await update.message.reply_text(
-            f"✅ Alias `{text}` ត្រូវបានកំណត់។\n\n⏳ សូមរងចាំ ១០ វិនាទី មុនចុច Mail OTP",
+            f"✅ Alias `{text}` ត្រូវបានកំណត់។\n\n⏳ សូមចុចប៊ូតុង Mail OTP",
             parse_mode="Markdown",
             reply_markup=get_reply_keyboard()
         )
