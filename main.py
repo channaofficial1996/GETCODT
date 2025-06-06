@@ -23,12 +23,13 @@ EMAIL_ACCOUNTS = {
 user_aliases = {}
 user_secrets = {}
 user_context = {}
+recent_otp_cache = {}  # to prevent repeating same OTP
 
 # ✅ Keyboard UI
 
 def get_reply_keyboard():
     return ReplyKeyboardMarkup(
-        [["📤 QR Secret", "📲 OTP", "📩 Mail OTP"]],
+        [["📤 QR Secret Key", "📲 2FA OTP", "📩 Mail OTP"]],
         resize_keyboard=True
     )
 
@@ -111,9 +112,9 @@ async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
             await update.message.reply_text("❌ សូមផ្ញើ alias email មុនសិន!")
             return
         domain = alias.split("@")[1].lower()
-        result = await fetch_mail_otp(alias, domain, debug_update=update)
+        result = await fetch_mail_otp(alias, domain, user_id, debug_update=update)
         if result:
-            await update.message.reply_text(f"✉️ Mail OTP: `{result}`", parse_mode="Markdown")
+            await update.message.reply_text(result, parse_mode="Markdown")
         else:
             await update.message.reply_text("❌ មិនមាន OTP សម្រាប់ alias នេះ។ (ប្រាកដថាសារមាន Debug ចង់ស្រាវជ្រាវ)")
 
@@ -139,7 +140,7 @@ def extract_otp(text):
 
 # ✅ Fetch OTP via IMAP
 
-async def fetch_mail_otp(alias_email, domain, debug_update=None):
+async def fetch_mail_otp(alias_email, domain, user_id, debug_update=None):
     accounts = EMAIL_ACCOUNTS.get(domain)
     if not accounts:
         return None
@@ -191,8 +192,21 @@ async def fetch_mail_otp(alias_email, domain, debug_update=None):
 
                 otp = extract_otp(subject) or extract_otp(body)
                 if otp:
-                    mail.logout()
-                    return otp
+                    # prevent repeat
+                    if recent_otp_cache.get(user_id) == otp:
+                        continue
+                    recent_otp_cache[user_id] = otp
+
+                    sender = msg.get("From", "Unknown")
+                    short_type = "សោរសុវត្ថិភាព"
+                    if "reset" in subject.lower():
+                        short_type = "សំណើកែពាក្យសម្ងាត់"
+                    elif "login" in subject.lower():
+                        short_type = "ចូលគណនី"
+                    elif "code" in subject.lower():
+                        short_type = "Security Code"
+
+                    return f"✉️ OTP: `{otp}`\nFrom: `{sender}`\nប្រភេទ: *{short_type}*"
 
                 if debug_update:
                     debug_msg = "\n".join([f"{k}: {v}" for k, v in zip([
