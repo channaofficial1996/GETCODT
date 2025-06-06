@@ -115,7 +115,7 @@ async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
         if result:
             await update.message.reply_text(f"✉️ Mail OTP: `{result}`", parse_mode="Markdown")
         else:
-            await update.message.reply_text("❌ មិនមាន OTP សម្រាប់ alias នេះ។")
+            await update.message.reply_text("❌ មិនមាន OTP សម្រាប់ alias នេះ។ (ប្រាកដថាសារមាន Debug ចង់ស្រាវជ្រាវ)")
 
     elif text == "📤 QR Secret":
         secret = user_secrets.get(user_id)
@@ -162,10 +162,24 @@ async def fetch_mail_otp(alias_email, domain, debug_update=None):
                     msg.get("X-Envelope-To", ""), msg.get("X-Yandex-Forward", ""),
                     msg.get("Cc", ""), msg.get("Bcc", "")
                 ]
-                header_str = " ".join([h.lower() for h in all_headers if h])
-                if alias_email.lower() not in header_str:
-                    continue
+                header_str = " ".join([h.lower().replace(" ", "") for h in all_headers if h])
+                alias_check = alias_email.lower().replace(" ", "")
+                base_check = alias_check.split("+")[0] + "@" + alias_check.split("@")[1]
 
+                if alias_check not in header_str and base_check not in header_str:
+                    body = ""
+                    if msg.is_multipart():
+                        for part in msg.walk():
+                            if part.get_content_type() == "text/plain":
+                                body = part.get_payload(decode=True).decode(errors='ignore')
+                                break
+                    else:
+                        body = msg.get_payload(decode=True).decode(errors='ignore')
+
+                    if alias_check not in body.lower().replace(" ", "") and base_check not in body.lower().replace(" ", ""):
+                        continue
+
+                subject = msg.get("Subject", "")
                 body = ""
                 if msg.is_multipart():
                     for part in msg.walk():
@@ -175,21 +189,20 @@ async def fetch_mail_otp(alias_email, domain, debug_update=None):
                 else:
                     body = msg.get_payload(decode=True).decode(errors='ignore')
 
-                subject = msg.get("Subject", "")
                 otp = extract_otp(subject) or extract_otp(body)
                 if otp:
                     mail.logout()
                     return otp
 
                 if debug_update:
-                    await debug_update.message.reply_text(
-                        f"🧪 Checked subject: {subject}\n🔍 Header: {header_str[:50]}..."
-                    )
+                    debug_msg = "\n".join([f"{k}: {v}" for k, v in zip([
+                        "To", "Delivered-To", "Cc", "Subject"], all_headers + [subject])])
+                    await debug_update.message.reply_text(f"🔎 Debug Headers & Preview:\n{debug_msg}\n\nBody:\n{body[:300]}")
 
             mail.logout()
         except Exception as e:
             if debug_update:
-                await debug_update.message.reply_text(f"❌ Error: {str(e)}")
+                await debug_update.message.reply_text(f"❌ IMAP Error: {e}")
             continue
 
     return None
