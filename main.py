@@ -7,25 +7,11 @@ import urllib.parse
 from telegram import Update, ReplyKeyboardMarkup
 from telegram.ext import ApplicationBuilder, CommandHandler, MessageHandler, ContextTypes, filters
 
-# --------- EDIT EMAIL ACCOUNTS HERE ---------
 EMAIL_ACCOUNTS = {
     "yandex.com": [
         {"email": "cambo.ads@yandex.com", "password": "jgexgxxedmqheewx", "imap": "imap.yandex.com"},
         {"email": "n4.ra@yandex.com", "password": "xiipvzmwomunjvnl", "imap": "imap.yandex.com"},
-    ],
-    "gmail.com": [
-        {"email": "your.email@gmail.com", "password": "your_app_pwd", "imap": "imap.gmail.com"},
-    ],
-    "zoho.com": [
-        {"email": "cambo.ads@zohomail.com", "password": "zoho_app_1", "imap": "imap.zoho.com"},
-        {"email": "cambo.ads2@zohomail.com", "password": "zoho_app_2", "imap": "imap.zoho.com"},
-    ],
-    "hotmail.com": [
-        {"email": "your.hotmail@hotmail.com", "password": "your_hotmail_pwd", "imap": "imap-mail.outlook.com"},
-    ],
-    "outlook.com": [
-        {"email": "your.outlook@outlook.com", "password": "your_outlook_pwd", "imap": "imap-mail.outlook.com"},
-    ],
+    ]
 }
 
 user_aliases = {}
@@ -44,16 +30,16 @@ def get_reply_keyboard():
 def detect_service(label):
     l = label.lower()
     if 'facebook' in l: return "Facebook 2FA"
-    if 'gmail' in l or 'google' in l: return "Gmail 2FA"
     if 'yandex' in l: return "Yandex 2FA"
-    if 'zoho' in l: return "Zoho 2FA"
     return "Other 2FA"
 
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text(
-        "👋 Welcome! \n\n"
-        "• ផ្ញើ alias email (ឧ. cambo.ads+123456@yandex.com)\n"
-        "• ឬផ្ញើ QR / Secret Key (manual)\n",
+        "👋 Welcome! 
+
+• ផ្ញើ alias email (ឧ. cambo.ads+123456@yandex.com)
+• ឬផ្ញើ QR / Secret Key (manual)
+",
         reply_markup=get_reply_keyboard()
     )
 
@@ -61,13 +47,9 @@ async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_id = update.effective_user.id
     text = update.message.text.strip()
 
-    if "+" in text and any(text.endswith(f"@{d}") for d in EMAIL_ACCOUNTS):
+    if "+" in text and text.endswith("@yandex.com"):
         user_aliases[user_id] = text
-        await update.message.reply_text(
-            f"✅ Alias `{text}` ត្រូវបានកំណត់។",
-            parse_mode="Markdown",
-            reply_markup=get_reply_keyboard()
-        )
+        await update.message.reply_text(f"✅ Alias `{text}` ត្រូវបានកំណត់។", parse_mode="Markdown", reply_markup=get_reply_keyboard())
         return
 
     elif re.fullmatch(r'[A-Z2-7]{16,}', text.upper()):
@@ -95,15 +77,15 @@ async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
         if result:
             await update.message.reply_text(f"✉️ Mail OTP: `{result}`", parse_mode="Markdown")
         else:
-            await update.message.reply_text("❌ មិនមាន OTP សម្រាប់ alias នេះ")
-        return
+            await update.message.reply_text("❌ មិនមាន OTP សម្រាប់ alias នេះ។ ពិនិត្យថា Email នៅក្នុង Inbox/Social ហើយបង្ហាញសារ Debug នៅខាងក្រោម។")
 
     elif text == "📤 QR Secret":
-        c = user_context.get(user_id, {})
         secret = user_secrets.get(user_id)
+        context_info = user_context.get(user_id, {})
         if secret:
             await update.message.reply_text(
-                f"✅ {c.get('service','2FA')} for *{c.get('label','Unknown')}*\n🔐 Secret: `{secret}`",
+                f"✅ {context_info.get('service','2FA')} for *{context_info.get('label','Unknown')}*
+🔐 Secret: `{secret}`",
                 parse_mode="Markdown"
             )
         else:
@@ -131,7 +113,8 @@ async def handle_photo(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 user_secrets[user_id] = secret
                 user_context[user_id] = {"label": label, "service": service}
                 await update.message.reply_text(
-                    f"✅ {service} for *{label}*\n🔐 Secret: `{secret}`",
+                    f"✅ {service} for *{label}*
+🔐 Secret: `{secret}`",
                     parse_mode="Markdown",
                     reply_markup=get_reply_keyboard()
                 )
@@ -142,12 +125,10 @@ async def handle_photo(update: Update, context: ContextTypes.DEFAULT_TYPE):
     except Exception as e:
         await update.message.reply_text(f"❌ Error reading QR: {str(e)}")
 
-# --------- OTP Extraction ---------
 def extract_otp(text):
     match = re.search(r'\b(\d{3}[-\s]?\d{3,5})\b', text)
     return match.group(1).replace('-', '').replace(' ', '') if match else None
 
-# --------- Mail OTP Core ---------
 async def fetch_mail_otp(alias_email, domain, debug_update=None):
     accounts = EMAIL_ACCOUNTS.get(domain)
     if not accounts:
@@ -162,52 +143,40 @@ async def fetch_mail_otp(alias_email, domain, debug_update=None):
                 continue
             for f in folders:
                 folder_name = f.decode().split('"/')[-1].strip('"')
-                if any(k in folder_name.lower() for k in ["inbox", "social", "facebook", "network"]):
-                    try:
-                        mail.select(f'"{folder_name}"')
-                        result, data = mail.search(None, "ALL")
-                        ids = data[0].split()
-                        latest_ids = ids[-20:] if len(ids) > 20 else ids
-                        for num in reversed(latest_ids):
-                            result, msg_data = mail.fetch(num, "(RFC822)")
-                            raw_email = msg_data[0][1]
-                            msg = email.message_from_bytes(raw_email)
-                            headers = [(h, msg.get(h, "")) for h in ["To", "Delivered-To", "Envelope-To", "X-Yandex-Forward", "Cc", "Bcc", "Subject"]]
-                            header_str = " ".join([h[1].lower().replace(" ", "").strip() for h in headers if h[1]])
-                            alias_check = alias_email.lower().replace(" ", "").strip()
-                            base_check = alias_check.split("+")[0] + "@" + alias_check.split("@")[-1]
-
-                            body = ""
-                            if msg.is_multipart():
-                                for part in msg.walk():
-                                    if part.get_content_type() == "text/plain":
-                                        body = part.get_payload(decode=True).decode(errors="ignore")
-                                        break
-                            else:
-                                body = msg.get_payload(decode=True).decode(errors="ignore")
-
-                            if alias_check not in header_str and base_check not in header_str \
-                               and alias_check not in body.lower().replace(" ", "") \
-                               and base_check not in body.lower().replace(" ", ""):
-                                continue
-
-                            otp = extract_otp(msg.get("Subject", "")) or extract_otp(body)
-                            if otp:
-                                mail.logout()
-                                return otp
-                    except Exception:
-                        continue
+                if any(k in folder_name.lower() for k in ["inbox", "social", "facebook", "network", "notification"]):
+                    mail.select(f'"{folder_name}"')
+                    result, data = mail.search(None, "ALL")
+                    ids = data[0].split()
+                    for num in reversed(ids[-25:]):
+                        result, msg_data = mail.fetch(num, "(RFC822)")
+                        raw_email = msg_data[0][1]
+                        msg = email.message_from_bytes(raw_email)
+                        headers = [(h, msg.get(h, "")) for h in ["To", "Delivered-To", "Subject"]]
+                        header_str = " ".join([h[1].lower().replace(" ", "") for h in headers if h[1]])
+                        alias_check = alias_email.lower().replace(" ", "")
+                        base_check = alias_check.split("+")[0] + "@" + alias_check.split("@")[-1]
+                        body = msg.get_payload(decode=True).decode(errors="ignore") if not msg.is_multipart() else ""
+                        if alias_check not in header_str and base_check not in header_str                             and alias_check not in body.lower().replace(" ", "")                             and base_check not in body.lower().replace(" ", ""):
+                            continue
+                        otp = extract_otp(msg.get("Subject", "")) or extract_otp(body)
+                        if otp:
+                            mail.logout()
+                            return otp
+                        if debug_update:
+                            debug_msg = "\n".join([f"{h[0]}: {h[1]}" for h in headers])
+                            preview = (body[:300] + "...") if len(body) > 300 else body
+                            await debug_update.message.reply_text(f"🔎 Debug Headers:
+{debug_msg}\n\n📄 Preview:
+{preview}")
             mail.logout()
         except Exception:
             continue
     return None
 
-# --------- BOT ENTRY POINT ---------
 BOT_TOKEN = "7845423216:AAHE0QIJy9nJ4jhz-xcQURUCQEvnIAgjEdE"
 app = ApplicationBuilder().token(BOT_TOKEN).build()
 app.add_handler(CommandHandler("start", start))
 app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_text))
 app.add_handler(MessageHandler(filters.PHOTO, handle_photo))
-
-print("🤖 Bot is running with QR/Secret + Alias Email OTP Support...")
+print("🤖 Bot is running with enhanced alias & debug support...")
 app.run_polling()
