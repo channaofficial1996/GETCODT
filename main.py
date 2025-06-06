@@ -201,7 +201,7 @@ async def fetch_mail_otp(alias_email, domain, user_id, debug_update=None):
             continue
     return None
 
-BOT_TOKEN = "YOUR_BOT_TOKEN"
+BOT_TOKEN = "7845423216:AAHE0QIJy9nJ4jhz-xcQURUCQEvnIAgjEdE"
 app = ApplicationBuilder().token(BOT_TOKEN).build()
 app.add_handler(CommandHandler("start", start))
 app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_text))
