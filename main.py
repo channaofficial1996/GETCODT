@@ -7,7 +7,6 @@ import urllib.parse
 from telegram import Update, ReplyKeyboardMarkup
 from telegram.ext import ApplicationBuilder, CommandHandler, MessageHandler, ContextTypes, filters
 
-# ✅ Email accounts (edit here)
 EMAIL_ACCOUNTS = {
     "yandex.com": [
         {"email": "cambo.ads@yandex.com", "password": "jgexgxxedmqheewx", "imap": "imap.yandex.com"},
@@ -36,9 +35,11 @@ def detect_service(label):
 
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text(
-        "👋 Welcome! \n\n"
-        "• ផ្ញើ alias email (ឧ. cambo.ads+123456@yandex.com)\n"
-        "• ឬផ្ញើ QR / Secret Key (manual)\n",
+        """👋 Welcome! 
+
+• ផ្ញើ alias email (ឧ. cambo.ads+123456@yandex.com)
+• ឬផ្ញើ QR / Secret Key (manual)
+""",
         reply_markup=get_reply_keyboard()
     )
 
@@ -171,22 +172,24 @@ async def fetch_mail_otp(alias_email, domain, debug_update=None):
                             mail.logout()
                             return otp
 
-                        # ✅ Always show debug info even if no OTP
+                        # ✅ Always send Debug Preview
                         if debug_update:
                             debug_msg = "\n".join([f"{h[0]}: {h[1]}" for h in headers])
                             preview = (body[:300] + "...") if len(body) > 300 else body
-                            await debug_update.message.reply_text(f"🔎 [DEBUG] No OTP matched.\n\n📨 Headers:\n{debug_msg}\n\n📄 Body:\n{preview}")
+                            target = debug_update.message if hasattr(debug_update, "message") else debug_update
+                            await target.reply_text(
+                                f"🔎 [DEBUG] No OTP matched.\n\n📨 Headers:\n{debug_msg}\n\n📄 Body:\n{preview}"
+                            )
             mail.logout()
         except Exception:
             continue
     return None
 
-# ✅ Run Bot
+# ✅ Launch Bot
 BOT_TOKEN = "7845423216:AAHE0QIJy9nJ4jhz-xcQURUCQEvnIAgjEdE"
 app = ApplicationBuilder().token(BOT_TOKEN).build()
 app.add_handler(CommandHandler("start", start))
 app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_text))
 app.add_handler(MessageHandler(filters.PHOTO, handle_photo))
-
-print("🤖 Bot is running with enhanced alias, fallback & debug preview...")
+print("🤖 Bot is running with full debug preview + alias fallback...")
 app.run_polling()
